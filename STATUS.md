@@ -2,15 +2,20 @@
 
 Updated 2026-10-23.
 
-## Done
-- Public repo: https://github.com/ngkaizheng/vuln-guard (MIT).
-- Install works: `npx skills add ngkaizheng/vuln-guard` (checked from GitHub) and `node install.mjs`.
-- Scanner verified on 4 real local repos (npm, uv, pip, .NET + npm audit + dotnet list package). Results match npm audit.
-- Fixed: Windows shell injection / spaces in paths for `dotnet`; duplicate runtime rows; "3.12" reported as patch-behind.
-- Tests + CI (Ubuntu/Windows × Node 18/22).
-- PR #1: bun.lock, Go stdlib (toolchain line only), alias severity for Go advisories, opt-in `--sarif`.
-- vuln-fix end-to-end on CoCoPet (branch `security/vuln-fix-20261023`, uncommitted): 11 → 2 findings, matched `pnpm audit` exactly, tests + build pass. Recipe note: `pnpm update <pkg>` takes the newest in range (browserslist 4.29.4, not 4.28.7).
+## Where it stands
+- Public repo: https://github.com/ngkaizheng/vuln-guard (MIT), version 1.1.0.
+- Install: `/plugin install vuln-guard --marketplace ngkaizheng/vuln-guard` (Claude Code), `codex plugin marketplace add ngkaizheng/vuln-guard`, `npx skills add ngkaizheng/vuln-guard`, or `node install.mjs`.
+- Accuracy: 9 real local projects, OSV-only mode vs each package manager's audit → 151/152 (package, advisory) pairs match. The one difference is an advisory withdrawn on 2026-10-22. Only npm, pnpm and NuGet are benchmarked.
+- vuln-fix tried end to end on CoCoPet: local branch `security/vuln-fix-20261023`, **uncommitted**, PR text in `E:\CoCoPet\.vuln-guard\reports\PR_DESCRIPTION.md`. 11 → 2 findings, including 2 critical Next.js RCEs fixed by next 16.4.1. Tests 170/170 and build pass. The user still has to review, commit and redeploy.
+- CI: validate job (frontmatter, links, version sync, zero deps) + tests on Ubuntu/Windows × Node 18/22 with live OSV, weekly.
 
-## Open
-- See TODO.md: company proxy laptop, real Claude Code / Copilot trigger test, vuln-setup and vuln-fix end-to-end.
-- Ideas: run `pnpm audit` as a native cross-check (only npm audit today); mark pnpm/bun transitive dev-only deps (tailwind chain shows as prod); Claude Code plugin marketplace (wait until value is confirmed).
+## Decisions made
+- Zero dependencies, one scanner file (see CONTRIBUTING.md). Top skill repos are plain markdown + small scripts too.
+- Go stdlib only from `toolchain` (the `go` line is a minimum, so it gave false positives).
+- SARIF is opt-in (`--sarif`). Company environments may block the upload, but the flag costs nothing when it isn't used.
+
+## Open / next
+- Not yet tested: company proxy laptop; real Claude Code / Copilot trigger test of the skills; vuln-setup end to end on a test repo.
+- Benchmark PyPI (pip-audit), Go (govulncheck) and Cargo (cargo audit) on real projects.
+- Ideas: `osv-scanner`-compatible JSON output; Yarn Berry / Bun dev-only detection; a short demo GIF for the README.
+- Growth: the README hook is "are we affected?" for big announced CVEs. Post when the next headline CVE lands (with a real before/after), and submit to awesome-claude-skills lists and the official plugin directory.

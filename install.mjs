@@ -42,8 +42,8 @@ for (const t of targets) {
       if (fs.existsSync(dest)) { fs.rmSync(dest, { recursive: true, force: true }); console.log(`removed  ${dest}`); }
       continue;
     }
-    const src = path.join(here, s);
-    if (!fs.existsSync(path.join(src, 'SKILL.md'))) { console.error(`Missing ${src}/SKILL.md — run from the unzipped vuln-guard folder.`); process.exit(1); }
+    const src = path.join(here, 'skills', s);
+    if (!fs.existsSync(path.join(src, 'SKILL.md'))) { console.error(`Missing ${src}/SKILL.md — run install.mjs from the vuln-guard repo folder.`); process.exit(1); }
     fs.rmSync(dest, { recursive: true, force: true });
     fs.mkdirSync(t, { recursive: true });
     fs.cpSync(src, dest, { recursive: true });

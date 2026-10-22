@@ -1,6 +1,6 @@
 ---
 name: vuln-check
-description: Scan the current project for published vulnerabilities that are still unfixed — dependencies in any ecosystem (npm/pnpm/yarn, NuGet, PyPI, Maven/Gradle, Go, Cargo, RubyGems, Composer, Pub), runtimes (.NET, Node.js, Python, Go...) and Docker base images, flagging CVEs that are actively exploited (CISA KEV). Use when asked to check for vulnerabilities, CVEs or security advisories, "are we affected by CVE-X", outdated or end-of-life runtimes, or before a release.
+description: Scan the current project for published vulnerabilities that are still unfixed — dependencies in any ecosystem (npm/pnpm/yarn/bun, NuGet, PyPI, Maven/Gradle, Go incl. standard library, Cargo, RubyGems, Composer, Pub), runtimes (.NET, Node.js, Python, Go...) and Docker base images — and rank them by real-world risk, actively exploited (CISA KEV) first. Read-only. Use when asked to check for vulnerabilities, CVEs, GHSA or security advisories, to audit dependencies (like npm audit / dotnet list package --vulnerable but for every ecosystem at once), "are we affected by CVE-X" or by a newly announced vulnerability, whether a package or version is safe, outdated or end-of-life runtimes, or before a release.
 ---
 
 # vuln-check
@@ -12,7 +12,7 @@ Find known, published vulnerabilities in this project that have not been fixed y
 | Area | Source of truth |
 |---|---|
 | Dependencies in every lockfile/manifest it finds (see [ecosystems](reference/ecosystems.md)) | OSV.dev (aggregates GitHub Advisories, NVD, PyPA, RustSec, Go vulndb…) |
-| Same, cross-checked with the package manager's own audit | `npm audit`, `dotnet list package --vulnerable` (run automatically when installed) |
+| Same, cross-checked with the package manager's own audit | `npm audit`, `pnpm audit`, `dotnet list package --vulnerable` (run automatically when installed) |
 | Is it being exploited in the wild? | CISA Known Exploited Vulnerabilities (KEV) catalog |
 | How likely is exploitation in the next 30 days? | FIRST EPSS |
 | Runtime / SDK / base image patch level and end-of-life | endoflife.date (TargetFramework, global.json, Dockerfile `FROM`, compose `image:`, `.nvmrc`, `engines`, `.python-version`, `go.mod`, `.tool-versions`) |
@@ -27,12 +27,13 @@ Only package **names and versions** leave the machine — never source code. Int
 2. **Make the dependency graph complete (read-only preparation).**
    - .NET: if a project has `<PackageReference>` but no `obj/project.assets.json` and no `packages.lock.json`, run `dotnet restore` in the solution folder first — otherwise only direct packages are checked. Restore only writes to `obj/`.
    - npm/pnpm/yarn without a lockfile: do **not** run install (it changes files). Report it as a gap.
+   - **Untrusted code** (a repo you just cloned from a stranger, a PR from a fork): skip `dotnet restore` and pass `--no-native`. `dotnet` evaluates MSBuild files, which can run code, and npm/pnpm read the repo's `.npmrc`. With `--no-native`, the scan only parses text and makes HTTPS lookups.
 
 3. **Run the scan** from the project root:
    ```
    node <skill-dir>/scripts/scan.mjs --path . --quiet
    ```
-   Then read `.vuln-guard/reports/report.json` (structured) or `report.md` (human-readable). Useful options: `--no-dev` (production deps only), `--offline` (no network), `--no-native` (skip npm audit / dotnet), `--fail-on kev|critical|high` (CI gate), `--out <dir>`, `--sarif <file>` (only if the user wants results in GitHub code scanning). Run `--help` for all. Exit codes: 0 ok, 1 findings at/above `--fail-on`, 2 tool error, 3 could not verify. Scanning a large repo with the native tools can take a few minutes — `dotnet list package` is the slow part.
+   Then read `.vuln-guard/reports/report.json` (structured) or `report.md` (human-readable). Useful options: `--no-dev` (production deps only), `--offline` (no network), `--no-native` (skip npm audit / pnpm audit / dotnet), `--fail-on kev|critical|high` (CI gate), `--out <dir>`, `--sarif <file>` (only if the user wants results in GitHub code scanning), `--no-local` (leave out this machine's installed runtimes; use in CI). Run `--help` for all. Exit codes: 0 ok, 1 findings at/above `--fail-on`, 2 tool error, 3 could not verify. Scanning a large repo with the native tools can take a few minutes — `dotnet list package` is the slow part.
 
 4. **Check the report is trustworthy before you summarise it.**
    - `"verified": false` or a "NOT VERIFIED" note means *nothing was actually checked* — never tell the user "no vulnerabilities". Fix connectivity first:

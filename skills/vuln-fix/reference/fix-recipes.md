@@ -19,6 +19,7 @@ The scan's `fixPlan[].command` gives a starting command. Details and the transit
     "<pkg>": "<fixed>"
   ```
   then `pnpm install`. Verify with `pnpm why <pkg>`.
+- `pnpm update <pkg>` moves to the **newest version allowed by the range**, not the minimum fixed one (e.g. browserslist 4.28.2 → 4.29.4 when the fix is 4.28.7). It often moves that package's own data dependencies too (caniuse-lite, electron-to-chromium…). That is normal; list them in the PR description. Run `git diff pnpm-lock.yaml` and check that nothing *unrelated* moved.
 
 ## Yarn
 - Classic: `yarn upgrade <pkg>@<fixed>`; transitive → `"resolutions": { "<pkg>": "<fixed>" }` in package.json, then `yarn install`.

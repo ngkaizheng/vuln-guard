@@ -7,7 +7,7 @@ vulnerability-scan:
     - apt-get update -qq && apt-get install -y -qq nodejs >/dev/null
     - dotnet restore YourSolution.sln
   script:
-    - node .vuln-guard/scan.mjs --fail-on critical
+    - node .vuln-guard/scan.mjs --fail-on critical --no-local
   artifacts:
     when: always
     paths: [.vuln-guard/reports/]

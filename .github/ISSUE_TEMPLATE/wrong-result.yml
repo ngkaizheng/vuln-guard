@@ -1,0 +1,33 @@
+name: Wrong result
+description: vuln-guard missed a vulnerability, reported one that doesn't apply, or got a version / priority wrong
+labels: [wrong-result]
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Summary line
+      description: The `vuln-guard: N packages scanned · …` line, and the vuln-guard version.
+    validations: { required: true }
+  - type: input
+    id: package
+    attributes:
+      label: Package, version, ecosystem and advisory ID
+      placeholder: "lodash 4.17.20 (npm), CVE-2021-23337 / GHSA-35jh-r3h4-6jhm"
+    validations: { required: true }
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong?
+      options: [Missed (false negative), Should not be reported (false positive), Wrong fixed version, Wrong priority / severity, Wrong runtime / EOL status, Other]
+    validations: { required: true }
+  - type: textarea
+    id: other
+    attributes:
+      label: What do other tools say?
+      description: Output of npm/pnpm audit, dotnet list package --vulnerable, osv-scanner, pip-audit… if you have it.
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal lockfile or manifest to reproduce
+      description: Trim it to the few packages involved. Remove internal package names.
+      render: text

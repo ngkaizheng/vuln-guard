@@ -1,1 +1,1 @@
-{ "name": "pn", "dependencies": { "axios": "1.6.0" } }
+{ "name": "pn", "dependencies": { "axios": "1.6.0" }, "devDependencies": { "vite": "5.0.0" } }
