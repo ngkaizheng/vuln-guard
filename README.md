@@ -89,4 +89,4 @@ VG_ONLINE=1 node --test test/scan.test.mjs     # also queries OSV.dev
 
 ## Limits
 
-Known advisories only — not a code scanner, secret scanner or pentest. Container OS packages are not scanned (use Trivy / Docker Scout). Maven `pom.xml` is direct-only without a lockfile. Binary `bun.lockb` isn't readable (text `bun.lock` is). Go standard library is checked from `toolchain` / `go x.y.z` in go.mod, not from the Go you build with — `govulncheck` is more precise.
+Known advisories only — not a code scanner, secret scanner or pentest. Container OS packages are not scanned (use Trivy / Docker Scout). Maven `pom.xml` is direct-only without a lockfile. Binary `bun.lockb` isn't readable (text `bun.lock` is). Go standard library is checked only when go.mod has a `toolchain` line (the `go` line is just a minimum); otherwise use `govulncheck`.

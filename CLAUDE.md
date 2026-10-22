@@ -13,3 +13,5 @@ State and next steps: `STATUS.md`. Tests: `node --test test/scan.test.mjs` (add 
 - transitive（间接依赖）：不是你直接装的，是被别的包带进来的依赖（待确认）
 - OSV：Google 维护的开源漏洞数据库，汇总 GitHub Advisories、PyPA、RustSec 等（待确认）
 - EOL：end of life，官方停止发安全补丁（待确认）
+- SARIF：扫描结果的标准 JSON 格式，GitHub code scanning 读它来显示安全警告（待确认）
+- stdlib：Go 标准库，编进程序里，漏洞要靠升级 Go toolchain 修（待确认）

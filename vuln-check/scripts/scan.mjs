@@ -276,9 +276,8 @@ function collect(cfg) {
     if (npmLock) parseNpmLock(npmLock.file, dir);
     if (yarnLock) parseYarnLock(yarnLock.file, dir);
     if (pnpmLock) parsePnpmLock(pnpmLock.file, dir);
-    const bunLock = has('bun.lock');
-    if (bunLock) parseBunLock(bunLock.file, dir);
-    else if (bases.has('bun.lockb')) note('warn', `${rel(dir)}: binary bun.lockb is not readable — run \`bun install --save-text-lockfile\` (Bun ≥ 1.1.39) to get bun.lock.`);
+    const bunLock = has('bun.lock') && parseBunLock(has('bun.lock').file, dir); // false if unreadable → treated as no lockfile
+    if (!has('bun.lock') && bases.has('bun.lockb')) note('warn', `${rel(dir)}: binary bun.lockb is not readable — run \`bun install --save-text-lockfile\` (Bun ≥ 1.1.39) to get bun.lock.`);
     if (pj && !npmLock && !yarnLock && !pnpmLock && !bunLock && !isWorkspaceChild(dir)) {
       note('warn', `${rel(pkgJson.file)} has no lockfile — exact versions unknown, only pinned versions checked. Run npm install / pnpm install to create one.`);
       for (const [n, v] of Object.entries({ ...pj.dependencies })) addPkg(ECO.npm, n, v, { file: rel(pkgJson.file), manager: 'npm', direct: true, dev: false, dir });
@@ -434,9 +433,11 @@ function parsePnpmLock(file, dir) {
 // bun.lock (Bun ≥ 1.2 text lockfile): JSON with trailing commas.
 // packages: { "<path>": ["name@version", registry, { deps }, integrity] }
 function parseBunLock(file, dir) {
-  const t = readText(file); if (!t) return;
+  const t = readText(file); if (!t) return false;
   let j;
-  try { j = JSON.parse(t.replace(/,(\s*[}\]])/g, '$1')); } catch { note('warn', `Could not parse ${rel(file)}`); return; }
+  // drop trailing commas, but leave string contents alone
+  try { j = JSON.parse(t.replace(/"(?:[^"\\]|\\.)*"|,(\s*[}\]])/g, (m, ws) => (ws === undefined ? m : ws))); }
+  catch { note('warn', `Could not parse ${rel(file)} — falling back to the versions pinned in package.json.`); return false; }
   FILES_SEEN.push(rel(file));
   const directInfo = DIRECT.get(`${dir}|npm`);
   const rootWs = j.workspaces?.[''] || {};
@@ -450,6 +451,7 @@ function parseBunLock(file, dir) {
     const direct = top && (prodNames.has(name) || devNames.has(name) || Boolean(directInfo && (directInfo.direct.has(name) || directInfo.dev.has(name))));
     addPkg(ECO.npm, name, version, { file: rel(file), manager: 'bun', direct, dev: top && devNames.has(name) && !prodNames.has(name), dir });
   }
+  return true;
 }
 
 // ── NuGet ──
@@ -614,10 +616,10 @@ function parseGoMod(file, dir) {
   const tool = (t.match(/^toolchain\s+go([\d.]+)/m) || [])[1];
   if (tool || goV) declareRuntime('go', tool || goV, file, `Go (${tool ? 'toolchain' : 'go directive'})`, Boolean(tool));
   // the Go standard library is compiled into the binary, so its CVEs ship with the app.
-  // OSV lists them under Go/"stdlib"; check the declared toolchain (or a full x.y.z go directive).
-  const stdlib = tool || (goV && goV.split('.').length >= 3 ? goV : null);
-  if (stdlib) addPkg(ECO.go, 'stdlib', stdlib, { file: rel(file), manager: 'go-toolchain', direct: true, dev: false, dir });
-  else if (goV) note('info', `${rel(file)}: \`go ${goV}\` without a patch version — Go standard library CVEs not checked. Add \`toolchain go${goV}.N\` or run govulncheck.`);
+  // OSV lists them under Go/"stdlib". Only the toolchain line says which Go builds it;
+  // `go 1.x.y` is a minimum, and checking it would flag CVEs that a newer toolchain already fixed.
+  if (tool) addPkg(ECO.go, 'stdlib', tool, { file: rel(file), manager: 'go-toolchain', direct: true, dev: false, dir });
+  else note('info', `${rel(file)}: no \`toolchain\` line, so Go standard library CVEs are not checked (\`go ${goV || '?'}\` is only a minimum). Run \`govulncheck ./...\` with the Go version CI uses.`);
   const add = (line) => {
     const m = line.trim().match(/^([^\s]+)\s+(v[^\s]+)(\s*\/\/\s*indirect)?/);
     if (m) addPkg(ECO.go, m[1], m[2], { file: rel(file), manager: 'go', direct: !m[3], dev: false, dir });
@@ -790,7 +792,6 @@ function localRuntimes() {
 // ───────────────────────────── network ─────────────────────────────
 
 const CACHE_DIR = path.join(os.tmpdir(), 'vuln-guard-cache');
-let networkFailures = 0;
 
 const DEAD_HOSTS = new Map(); // host → reason; fail fast after the first connection failure
 
@@ -801,12 +802,11 @@ async function http(url, opts = {}, timeoutMs = 25000) {
   try {
     r = await fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs), headers: { 'user-agent': `vuln-guard/${TOOL_VERSION}`, ...(opts.headers || {}) } });
   } catch (e) {
-    networkFailures++;
     const reason = e.cause?.code || (e.name === 'TimeoutError' ? 'timeout' : e.message);
     DEAD_HOSTS.set(host, reason);
     throw new Error(`${host}: ${reason}`);
   }
-  if (!r.ok) { networkFailures++; throw new Error(`${host}: HTTP ${r.status}`); }
+  if (!r.ok) throw new Error(`${host}: HTTP ${r.status}`);
   return await r.json();
 }
 
@@ -1353,13 +1353,25 @@ const SARIF_LEVEL = { critical: 'error', high: 'error', moderate: 'warning', low
 const LINES = new Map(); // file → lines, read once
 function lineOf(file, name) {
   if (!LINES.has(file)) LINES.set(file, (readText(path.join(OPTS.path, file)) || '').split(/\r?\n/));
-  const i = LINES.get(file).findIndex((l) => l.includes(name));
+  // whole name only: "ms" must not match "items"
+  const re = new RegExp(`(?<![\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`);
+  const i = LINES.get(file).findIndex((l) => re.test(l));
   return i >= 0 ? i + 1 : 1;
+}
+
+// GitHub resolves SARIF paths from the repository root, which may sit above --path
+function repoPrefix() {
+  for (let d = OPTS.path; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return path.relative(d, OPTS.path).split(path.sep).join('/');
+    if (path.dirname(d) === d) return '';
+  }
 }
 
 function renderSarif(r) {
   const rules = new Map();
   const results = [];
+  const prefix = repoPrefix();
+  const loc = (file, line) => ({ physicalLocation: { artifactLocation: { uri: prefix ? `${prefix}/${file}` : file, uriBaseId: '%SRCROOT%' }, region: { startLine: line } } });
   for (const f of r.findings) {
     if (!rules.has(f.id)) {
       rules.set(f.id, {
@@ -1377,9 +1389,29 @@ function renderSarif(r) {
       ruleId: f.id,
       level: f.kev ? 'error' : SARIF_LEVEL[f.severity] || 'warning',
       message: { text: `${f.package} ${f.version} (${f.ecosystem}, ${f.direct ? 'direct' : 'transitive'}${f.devOnly ? ', dev' : ''}): ${f.summary || f.id}.${exploited} ${fix}` },
-      locations: [{ physicalLocation: { artifactLocation: { uri: file, uriBaseId: '%SRCROOT%' }, region: { startLine: lineOf(file, f.package) } } }],
+      locations: [loc(file, lineOf(file, f.package))],
       partialFingerprints: { 'vulnGuard/v1': `${f.ecosystem}|${f.package}|${f.version}|${f.id}` },
       properties: { priority: f.priority },
+    });
+  }
+  // runtimes / base images declared in the repo (not this machine's installs)
+  const RT_RULE = {
+    eol: ['runtime-eol', 'Runtime or base image is end of life (no security patches)', 'error', '7.5'],
+    outdated: ['runtime-outdated', 'Runtime or base image is behind on security patches', 'warning', '5.0'],
+    'eol-soon': ['runtime-eol-soon', 'Runtime or base image support ends soon', 'note', '3.0'],
+  };
+  for (const x of r.runtimes) {
+    const rule = RT_RULE[x.status];
+    if (!rule || x.file === '(local)') continue;
+    const [id, text, level, score] = rule;
+    if (!rules.has(id)) rules.set(id, { id, shortDescription: { text }, helpUri: 'https://endoflife.date', properties: { tags: ['security', 'runtime'], 'security-severity': score } });
+    const file = x.file.replace(/ \(\+\d+ more\)$/, '');
+    results.push({
+      ruleId: id,
+      level,
+      message: { text: `${x.product} ${x.version} (${x.where}): ${x.advice || x.status}` },
+      locations: [loc(file, x.version ? lineOf(file, x.version) : 1)],
+      partialFingerprints: { 'vulnGuard/v1': `runtime|${x.product}|${x.version}|${file}` },
     });
   }
   return {

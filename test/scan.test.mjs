@@ -34,8 +34,9 @@ test('offline scan produces a report', () => {
 test('inventory counts every lockfile type', () => {
   const inv = offline.report.inventory;
   // npm: lodash, minimist 1.2.5 + nested 0.0.8 (package-lock v3), axios + @babel/core (pnpm v9), @babel/traverse (yarn v1),
-  // express + nested body-parser + typescript (bun.lock; the workspace: entry is skipped)
-  assert.equal(inv.byEcosystem.npm, 9);
+  // express + nested body-parser + typescript (bun.lock; the workspace: entry is skipped, ", ]" inside a string survives),
+  // left-pad from package.json because bunbad/bun.lock is broken
+  assert.equal(inv.byEcosystem.npm, 10);
   // Go: golang.org/x/net, golang.org/x/text and the standard library from `toolchain go1.21.0`
   assert.equal(inv.byEcosystem.Go, 3);
   // Newtonsoft.Json via $(JsonVer) property, de-duplicated across two projects; System.Text.Encodings.Web
@@ -51,6 +52,10 @@ test('inventory counts every lockfile type', () => {
 test('offline result is never reported as clean', () => {
   assert.equal(offline.report.verified, false);
   assert.ok(offline.report.notes.some((n) => /NOT VERIFIED/.test(n.msg)));
+});
+
+test('unreadable bun.lock falls back to package.json', () => {
+  assert.ok(offline.report.notes.some((n) => /bunbad\/bun\.lock.*falling back/.test(n.msg)));
 });
 
 test('missing restore is reported for .NET projects', () => {
@@ -109,14 +114,18 @@ test('online: known CVEs are found and ranked', { skip: !process.env.VG_ONLINE &
   assert.ok(go.filter((f) => f.severity === 'unknown').length < go.length / 10, 'most Go findings get a severity');
   const sameLine = go.find((f) => f.package === 'stdlib' && f.fixedIn?.startsWith('1.21.'));
   const newLine = go.find((f) => f.package === 'stdlib' && f.fixedIn && !f.fixedIn.startsWith('1.21.'));
+  assert.ok(sameLine && newLine, 'stdlib has fixes in and after the 1.21 line');
   assert.equal(sameLine.majorUpgrade, false, 'Go 1.21.0 → 1.21.x is a patch');
   assert.equal(newLine.majorUpgrade, true, 'Go 1.21 → newer line needs a decision');
 
-  // SARIF mirrors the findings
+  // SARIF mirrors the findings; paths are relative to the git root (the fixture is inside this repo)
   const results = sarif.runs[0].results;
-  assert.equal(results.length, report.findings.length);
-  const kevResult = results.find((x) => /CISA KEV/.test(x.message.text));
+  assert.equal(results.filter((x) => !x.ruleId.startsWith('runtime-')).length, report.findings.length);
+  const kevResult = results.find((x) => x.ruleId === 'CVE-2023-44487' && x.message.text.startsWith('golang.org/x/net'));
   assert.equal(kevResult.level, 'error');
-  assert.equal(kevResult.locations[0].physicalLocation.artifactLocation.uri, 'go/go.mod');
+  assert.equal(kevResult.locations[0].physicalLocation.artifactLocation.uri, 'test/fixtures/mixed/go/go.mod');
+  assert.equal(kevResult.locations[0].physicalLocation.region.startLine, 8, 'line of golang.org/x/net in go.mod');
+  // .NET 8 aspnet:8.0.1 image is behind on patches → a runtime result
+  assert.ok(results.some((x) => x.ruleId.startsWith('runtime-') && /aspnet:8\.0\.1/.test(x.message.text)));
   for (const rule of sarif.runs[0].tool.driver.rules) assert.ok(Number(rule.properties['security-severity']) >= 0);
 });

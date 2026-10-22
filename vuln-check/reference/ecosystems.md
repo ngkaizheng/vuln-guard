@@ -10,7 +10,7 @@ The scanner walks the project (skipping `node_modules`, `bin`, `dist`, `.git`, `
 | Bun | `bun.lock` (text, Bun ≥ 1.2) | binary `bun.lockb` is reported as a gap |
 | NuGet / .NET | `obj/project.assets.json` (full graph after restore), `packages.lock.json`, `*.csproj` / `*.fsproj` / `*.vbproj`, `Directory.Packages.props` (central package management, `VersionOverride`, `$(Property)` versions), `packages.config` | `dotnet list package --vulnerable --include-transitive` also runs when the SDK is installed |
 | PyPI | `requirements*.txt` / `constraints*.txt` (pinned `==` lines), `poetry.lock`, `uv.lock`, `Pipfile.lock` | Unpinned requirement lines (`>=`) are listed as gaps |
-| Go | `go.mod` (require blocks, `// indirect`) | standard library (`stdlib`) checked from `toolchain go1.x.y` or a full `go 1.x.y`; `go` / `toolchain` also checked for EOL |
+| Go | `go.mod` (require blocks, `// indirect`) | standard library (`stdlib`) checked from the `toolchain go1.x.y` line (not the `go` minimum); `go` / `toolchain` also checked for EOL |
 | Rust | `Cargo.lock` | workspace crates skipped |
 | Ruby | `Gemfile.lock` | Ruby version from `RUBY VERSION` |
 | PHP | `composer.lock` | |

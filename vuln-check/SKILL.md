@@ -69,7 +69,7 @@ Only package **names and versions** leave the machine — never source code. Int
 - Known, published advisories only. Not a code scanner (SAST), not a secret scanner, not a pentest.
 - Container images: base image *version/EOL* is checked, OS packages inside the image are not (use Trivy / Docker Scout / Grype).
 - Maven `pom.xml`: direct dependencies only unless a `gradle.lockfile` or osv-scanner is used. Binary `bun.lockb` is not readable (ask for `bun install --save-text-lockfile`).
-- Go standard library: checked from go.mod `toolchain` / full `go x.y.z`, which may differ from the Go version CI actually builds with. Suggest `govulncheck` for call-level precision.
+- Go standard library: checked only from the go.mod `toolchain` line, which may still differ from the Go that CI builds with. Without one, say stdlib was not checked and suggest `govulncheck ./...`.
 - Advisory databases lag a few hours to days behind vendor bulletins.
 
 ## Configuration (`.vuln-guard/config.json`)
