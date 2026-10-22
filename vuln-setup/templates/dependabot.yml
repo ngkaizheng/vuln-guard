@@ -1,0 +1,26 @@
+# .github/dependabot.yml
+# Keep one block per ecosystem *and* directory that actually exists in the repo; delete the rest.
+# Also enable "Dependabot security updates" in Settings → Code security (can't be set from this file).
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: "/" # folder with the .sln / Directory.Packages.props
+    schedule: { interval: weekly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: npm # also covers pnpm and yarn
+    directory: "/web"
+    schedule: { interval: weekly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule: { interval: weekly }
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: monthly }
+
+  # Others as needed: pip, gomod, cargo, bundler, composer, maven, gradle, pub

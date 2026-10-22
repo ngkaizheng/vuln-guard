@@ -1,0 +1,4 @@
+# comment
+Django==3.2.0
+requests[socks]==2.25.0  # pinned
+flask>=2.0

@@ -1,0 +1,48 @@
+# vulnerability-scan.azure-pipelines.yml  (or add the steps to an existing pipeline)
+# Scans dependencies, runtimes and base images for known vulnerabilities (vuln-guard).
+
+trigger:
+  branches:
+    include: [main]
+
+pr:
+  branches:
+    include: ["*"]
+
+schedules:
+  - cron: "17 1 * * 1" # every Monday 01:17 UTC — new CVEs appear without code changes
+    displayName: Weekly vulnerability scan
+    branches:
+      include: [main]
+    always: true
+
+pool:
+  vmImage: ubuntu-latest # or your self-hosted pool
+
+variables:
+  # Self-hosted agent behind a corporate proxy? Uncomment and fill in:
+  # HTTPS_PROXY: http://proxy.company.local:8080
+  # NODE_USE_ENV_PROXY: "1"
+  # NODE_EXTRA_CA_CERTS: /etc/ssl/certs/company-root-ca.pem
+  NUGET_PACKAGES: $(Pipeline.Workspace)/.nuget/packages
+
+steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: "22.x"
+
+  # ── .NET: remove these two steps if the repo has no .NET projects ──
+  - task: UseDotNet@2
+    inputs:
+      useGlobalJson: true # or: packageType: sdk, version: 8.0.x
+  - script: dotnet restore YourSolution.sln
+    displayName: Restore (full transitive package graph for the scanner)
+
+  - script: node .vuln-guard/scan.mjs --fail-on critical
+    displayName: Vulnerability scan
+    # --fail-on kev | critical | high ; exit code 3 = no advisory source reachable (proxy?)
+
+  - publish: .vuln-guard/reports
+    artifact: vulnerability-report
+    displayName: Publish vulnerability report
+    condition: always()

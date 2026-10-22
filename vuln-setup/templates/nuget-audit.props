@@ -1,0 +1,15 @@
+<!-- Merge into Directory.Build.props at the solution root (create the file with <Project>…</Project> if missing). -->
+<Project>
+  <PropertyGroup Label="NuGet vulnerability audit">
+    <NuGetAudit>true</NuGetAudit>
+    <!-- all = include transitive packages (default from the .NET 9 SDK; .NET 8 SDK defaults to direct only) -->
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <!-- Fail CI builds on high (NU1903) and critical (NU1904) advisories; local builds only warn.
+         GitHub Actions sets CI=true, Azure Pipelines sets TF_BUILD=True. -->
+    <WarningsAsErrors Condition="'$(CI)' == 'true' Or '$(TF_BUILD)' == 'true'">$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>
+    <!-- Optional, reproducible restores. CI must then restore in locked mode (dotnet restore, locked-mode switch).
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    -->
+  </PropertyGroup>
+</Project>

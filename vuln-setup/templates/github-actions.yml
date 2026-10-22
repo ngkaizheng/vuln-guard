@@ -1,0 +1,52 @@
+# .github/workflows/vulnerability-scan.yml
+# Scans dependencies, runtimes and base images for known vulnerabilities (vuln-guard).
+# Bump the action majors below to their latest releases when you adopt this.
+name: vulnerability-scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 1 * * 1" # every Monday 01:17 UTC — new CVEs appear without code changes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # ── .NET: remove these two steps if the repo has no .NET projects ──
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json # or: dotnet-version: 8.0.x
+      - name: Restore (gives the scanner the full transitive package graph)
+        run: dotnet restore ./YourSolution.sln
+
+      - name: Vulnerability scan
+        run: node .vuln-guard/scan.mjs --fail-on critical
+        # --fail-on kev      → fail only on actively exploited CVEs
+        # --fail-on critical → fail on critical or actively exploited (recommended)
+        # --fail-on high     → stricter
+        # exit code 3 = no advisory source reachable (network/proxy problem)
+
+      - name: Add report to the job summary
+        if: always()
+        run: |
+          if [ -f .vuln-guard/reports/report.md ]; then cat .vuln-guard/reports/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: vulnerability-report
+          path: .vuln-guard/reports/
+          retention-days: 30

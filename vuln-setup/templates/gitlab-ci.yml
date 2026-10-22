@@ -1,0 +1,18 @@
+# Add to .gitlab-ci.yml
+# Create a weekly pipeline schedule in CI/CD → Schedules as well — new CVEs appear without code changes.
+vulnerability-scan:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0 # has no Node: install it below. No .NET? use node:22 and drop the dotnet lines
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq nodejs >/dev/null
+    - dotnet restore YourSolution.sln
+  script:
+    - node .vuln-guard/scan.mjs --fail-on critical
+  artifacts:
+    when: always
+    paths: [.vuln-guard/reports/]
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"
