@@ -14,12 +14,16 @@ const FIXTURE = path.join(here, 'fixtures', 'mixed');
 
 function scan(...args) {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'vg-test-'));
-  const r = spawnSync(process.execPath, [SCAN, '--path', FIXTURE, '--out', out, '--json', ...args], { encoding: 'utf8', timeout: 120000 });
-  let report = null;
+  const sarifFile = path.join(out, 'report.sarif');
+  const r = spawnSync(process.execPath, [SCAN, '--path', FIXTURE, '--out', out, '--json', '--sarif', sarifFile, ...args], { encoding: 'utf8', timeout: 240000 });
+  let report = null, sarif = null;
   try { report = JSON.parse(r.stdout); } catch { /* asserted by caller */ }
+  try { sarif = JSON.parse(fs.readFileSync(sarifFile, 'utf8')); } catch { /* asserted by caller */ }
   fs.rmSync(out, { recursive: true, force: true });
-  return { code: r.status, report, stderr: r.stderr };
+  return { code: r.status, report, sarif, stderr: r.stderr };
 }
+
+const pkgs = (report, eco) => report.findings.filter((f) => f.ecosystem === eco);
 
 const offline = scan('--offline', '--no-native');
 test('offline scan produces a report', () => {
@@ -29,14 +33,18 @@ test('offline scan produces a report', () => {
 
 test('inventory counts every lockfile type', () => {
   const inv = offline.report.inventory;
-  // npm: lodash, minimist 1.2.5 + nested 0.0.8 (package-lock v3), axios + @babel/core (pnpm v9), @babel/traverse (yarn v1)
-  assert.equal(inv.byEcosystem.npm, 6);
+  // npm: lodash, minimist 1.2.5 + nested 0.0.8 (package-lock v3), axios + @babel/core (pnpm v9), @babel/traverse (yarn v1),
+  // express + nested body-parser + typescript (bun.lock; the workspace: entry is skipped, ", ]" inside a string survives),
+  // left-pad from package.json because bunbad/bun.lock is broken
+  assert.equal(inv.byEcosystem.npm, 10);
+  // Go: golang.org/x/net, golang.org/x/text and the standard library from `toolchain go1.21.0`
+  assert.equal(inv.byEcosystem.Go, 3);
   // Newtonsoft.Json via $(JsonVer) property, de-duplicated across two projects; System.Text.Encodings.Web
   assert.equal(inv.byEcosystem.NuGet, 2);
   // Django + requests[socks]; flask>=2.0 is unpinned
   assert.equal(inv.byEcosystem.PyPI, 2);
   assert.deepEqual(inv.unpinned.map((u) => u.name), ['flask']);
-  for (const f of ['web/package-lock.json', 'pn/pnpm-lock.yaml', 'yarn/yarn.lock', 'py/requirements.txt', 'api/Api.csproj', 'api/Dockerfile']) {
+  for (const f of ['web/package-lock.json', 'pn/pnpm-lock.yaml', 'yarn/yarn.lock', 'py/requirements.txt', 'api/Api.csproj', 'api/Dockerfile', 'bun/bun.lock', 'go/go.mod']) {
     assert.ok(inv.files.includes(f), `scanned ${f}`);
   }
 });
@@ -44,6 +52,10 @@ test('inventory counts every lockfile type', () => {
 test('offline result is never reported as clean', () => {
   assert.equal(offline.report.verified, false);
   assert.ok(offline.report.notes.some((n) => /NOT VERIFIED/.test(n.msg)));
+});
+
+test('unreadable bun.lock falls back to package.json', () => {
+  assert.ok(offline.report.notes.some((n) => /bunbad\/bun\.lock.*falling back/.test(n.msg)));
 });
 
 test('missing restore is reported for .NET projects', () => {
@@ -61,6 +73,12 @@ test('runtimes: same TFM in two projects is one row; multi-stage alias skipped',
   assert.ok(rt.some((r) => r.product === 'nodejs' && /engines/.test(r.where)));
 });
 
+test('SARIF is written even when there are no findings', () => {
+  assert.equal(offline.sarif.version, '2.1.0');
+  assert.equal(offline.sarif.runs[0].tool.driver.name, 'vuln-guard');
+  assert.deepEqual(offline.sarif.runs[0].results, []);
+});
+
 test('--fail-on with no advisory source exits 3', () => {
   assert.equal(scan('--offline', '--no-native', '--no-runtime', '--fail-on', 'critical').code, 3);
 });
@@ -70,7 +88,7 @@ test('bad option exits 2', () => {
 });
 
 test('online: known CVEs are found and ranked', { skip: !process.env.VG_ONLINE && 'set VG_ONLINE=1' }, () => {
-  const { code, report } = scan('--no-native', '--fail-on', 'critical');
+  const { code, report, sarif } = scan('--no-native', '--fail-on', 'critical');
   assert.equal(report.verified, true);
   assert.equal(report.sources.osv, 'ok');
   const ids = (pkg) => report.findings.filter((f) => f.package === pkg).flatMap((f) => f.aliases);
@@ -82,4 +100,32 @@ test('online: known CVEs are found and ranked', { skip: !process.env.VG_ONLINE &
   assert.equal(lodash.fixedIn, '4.17.21');
   assert.equal(lodash.majorUpgrade, false);
   assert.equal(code, 1, 'critical findings fail the gate');
+
+  // bun.lock: direct vs nested
+  const express = report.findings.find((f) => f.package === 'express');
+  assert.ok(express && express.direct && express.manager === 'bun');
+  const bodyParser = report.findings.find((f) => f.package === 'body-parser');
+  assert.ok(bodyParser && !bodyParser.direct, 'nested bun package is transitive');
+
+  // Go: standard library CVEs, HTTP/2 Rapid Reset in KEV, severities borrowed from GHSA/Bitnami aliases
+  const go = pkgs(report, 'Go');
+  assert.ok(go.some((f) => f.package === 'stdlib' && f.aliases.includes('CVE-2023-39325')), 'stdlib 1.21.0');
+  assert.ok(go.some((f) => f.kev && f.kev.cve === 'CVE-2023-44487' && f.priority === 'P0'), 'KEV → P0');
+  assert.ok(go.filter((f) => f.severity === 'unknown').length < go.length / 10, 'most Go findings get a severity');
+  const sameLine = go.find((f) => f.package === 'stdlib' && f.fixedIn?.startsWith('1.21.'));
+  const newLine = go.find((f) => f.package === 'stdlib' && f.fixedIn && !f.fixedIn.startsWith('1.21.'));
+  assert.ok(sameLine && newLine, 'stdlib has fixes in and after the 1.21 line');
+  assert.equal(sameLine.majorUpgrade, false, 'Go 1.21.0 → 1.21.x is a patch');
+  assert.equal(newLine.majorUpgrade, true, 'Go 1.21 → newer line needs a decision');
+
+  // SARIF mirrors the findings; paths are relative to the git root (the fixture is inside this repo)
+  const results = sarif.runs[0].results;
+  assert.equal(results.filter((x) => !x.ruleId.startsWith('runtime-')).length, report.findings.length);
+  const kevResult = results.find((x) => x.ruleId === 'CVE-2023-44487' && x.message.text.startsWith('golang.org/x/net'));
+  assert.equal(kevResult.level, 'error');
+  assert.equal(kevResult.locations[0].physicalLocation.artifactLocation.uri, 'test/fixtures/mixed/go/go.mod');
+  assert.equal(kevResult.locations[0].physicalLocation.region.startLine, 8, 'line of golang.org/x/net in go.mod');
+  // .NET 8 aspnet:8.0.1 image is behind on patches → a runtime result
+  assert.ok(results.some((x) => x.ruleId.startsWith('runtime-') && /aspnet:8\.0\.1/.test(x.message.text)));
+  for (const rule of sarif.runs[0].tool.driver.rules) assert.ok(Number(rule.properties['security-severity']) >= 0);
 });
