@@ -7,6 +7,9 @@ importers:
       axios:
         specifier: 1.6.0
         version: 1.6.0
+      string-width-cjs:
+        specifier: npm:string-width@^4.2.0
+        version: string-width@4.2.3
     devDependencies:
       vite:
         specifier: 5.0.0
@@ -19,6 +22,12 @@ packages:
 
   follow-redirects@1.15.0:
     resolution: {integrity: sha512-a}
+
+  string-width@4.2.3:
+    resolution: {integrity: sha512-d}
+
+  ansi-regex@5.0.0:
+    resolution: {integrity: sha512-e}
 
   vite@5.0.0:
     resolution: {integrity: sha512-b}
@@ -36,6 +45,12 @@ snapshots:
       follow-redirects: 1.15.0
 
   follow-redirects@1.15.0: {}
+
+  string-width@4.2.3:
+    dependencies:
+      ansi-regex: 5.0.0
+
+  ansi-regex@5.0.0: {}
 
   vite@5.0.0(@types/node@20.0.0):
     dependencies:

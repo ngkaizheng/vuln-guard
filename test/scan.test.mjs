@@ -33,11 +33,11 @@ test('offline scan produces a report', () => {
 
 test('inventory counts every lockfile type', () => {
   const inv = offline.report.inventory;
-  // npm: lodash, minimist 1.2.5 + nested 0.0.8 (package-lock v3), axios, follow-redirects, vite, esbuild, @babel/core (pnpm v9),
+  // npm: lodash, minimist 1.2.5 + nested 0.0.8 (package-lock v3), axios, follow-redirects, string-width + ansi-regex (npm alias), vite, esbuild, @babel/core (pnpm v9),
   // @babel/traverse (yarn v1),
   // express + nested body-parser + typescript (bun.lock; the workspace: entry is skipped, ", ]" inside a string survives),
   // left-pad from package.json because bunbad/bun.lock is broken
-  assert.equal(inv.byEcosystem.npm, 13);
+  assert.equal(inv.byEcosystem.npm, 15);
   // Go: golang.org/x/net, golang.org/x/text and the standard library from `toolchain go1.21.0`
   assert.equal(inv.byEcosystem.Go, 3);
   // Newtonsoft.Json via $(JsonVer) property, de-duplicated across two projects; System.Text.Encodings.Web
@@ -65,6 +65,7 @@ test('pnpm: transitive packages reachable only from devDependencies are dev-only
   const prod = new Set(scan('--offline', '--no-native', '--no-runtime', '--no-dev', '--config', cfg).report.inventory.privateSkipped);
   fs.rmSync(path.dirname(cfg), { recursive: true, force: true });
   assert.ok(prod.has('axios@1.6.0') && prod.has('follow-redirects@1.15.0'), 'prod root and its dependency');
+  assert.ok(prod.has('string-width@4.2.3') && prod.has('ansi-regex@5.0.0'), 'npm alias root and its dependency');
   for (const dev of ['vite@5.0.0', 'esbuild@0.19.0', '@babel/core@7.20.0']) assert.ok(!prod.has(dev), `${dev} is dev-only`);
 });
 
@@ -87,6 +88,12 @@ test('SARIF is written even when there are no findings', () => {
   assert.equal(offline.sarif.version, '2.1.0');
   assert.equal(offline.sarif.runs[0].tool.driver.name, 'vuln-guard');
   assert.deepEqual(offline.sarif.runs[0].results, []);
+});
+
+test('--no-local leaves out runtimes installed on this machine', () => {
+  const rt = scan('--offline', '--no-native', '--no-local').report.runtimes;
+  assert.ok(rt.length > 0);
+  assert.ok(rt.every((r) => r.file !== '(local)'));
 });
 
 test('--fail-on with no advisory source exits 3', () => {

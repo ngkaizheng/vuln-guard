@@ -69,9 +69,9 @@ Then ask your agent. The skills trigger on their own.
 
 ## Does it find the right things?
 
-Results for 8 real projects. vuln-guard ran in OSV-only mode (`--no-native`), compared with each package manager's own audit, counted as (package, advisory) pairs:
+Results for 9 real projects. vuln-guard ran in OSV-only mode (`--no-native`), compared with each package manager's own audit, counted as (package, advisory) pairs:
 
-| Project | Packages | `npm`/`pnpm audit` | vuln-guard | Same |
+| Project | Packages | Package manager's audit | vuln-guard | Same |
 |---|---:|---:|---:|---:|
 | Next.js app (pnpm) | 463 | 11 | 11 | 11 |
 | Hardhat + Solidity tooling (npm) | 588 | 68 | 67 | 67 ¹ |
@@ -81,8 +81,11 @@ Results for 8 real projects. vuln-guard ran in OSV-only mode (`--no-native`), co
 | Game frontend (npm) | 162 | 11 | 11 | 11 |
 | Vite frontend (npm) | 68 | 7 | 7 | 7 |
 | RAG web UI (npm) | 201 | 0 | 0 | 0 |
+| .NET 10 API + client (NuGet, `dotnet list package --vulnerable`) | 90 | 1 | 1 | 1 |
 
 ¹ The one difference is GHSA-hp3w-g68c-fv3c, which was **withdrawn** on 2026-10-22. vuln-guard skips withdrawn advisories.
+
+This comparison covers npm, pnpm and NuGet, the ecosystems that have a built-in audit command to compare against. PyPI, Go, Bun, Cargo and the others are checked by [tests](test/scan.test.mjs) against known CVEs, but have not been benchmarked on real projects yet. A [wrong-result report](https://github.com/ngkaizheng/vuln-guard/issues/new?template=wrong-result.yml) helps.
 
 On top of the audit tools, vuln-guard adds what they don't have:
 - **Exploitation data.** CISA KEV and EPSS. The [demo](examples/demo-app/REPORT.md) puts HTTP/2 Rapid Reset (CVE-2023-44487) and a Vite file-read bug at **P0**, because attackers use both today.

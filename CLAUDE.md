@@ -15,3 +15,6 @@ State and next steps: `STATUS.md`. Tests: `node --test test/scan.test.mjs` (add 
 - EOL：end of life，官方停止发安全补丁（待确认）
 - SARIF：扫描结果的标准 JSON 格式，GitHub code scanning 读它来显示安全警告（待确认）
 - stdlib：Go 标准库，编进程序里，漏洞要靠升级 Go toolchain 修（待确认）
+- LTS：长期支持版本（如 Node 24、.NET 10），升级建议优先推荐它（待确认）
+- dev-only：只在开发/构建时用、不随产品上线的依赖，优先级降一级（待确认）
+- plugin marketplace：Claude Code 的插件目录，用 /plugin install 安装（待确认）

@@ -1,9 +1,9 @@
 # Vulnerability report — demo-app
 
-_Scanned 2026-10-22 20:49 UTC · vuln-guard 1.1.0 · OSV: ok · KEV: ok (www.cisa.gov, catalog 2026.10.21)_
+_Scanned 2026-10-22 20:53 UTC · vuln-guard 1.1.0 · OSV: ok · KEV: ok (www.cisa.gov, catalog 2026.10.21)_
 
 **7** packages scanned (npm 5, Go 2).
-**172** known vulnerabilities in **7** packages — ⚠️ actively exploited (KEV) **2**, critical **10**, high **66**, moderate **89**, low **6**, unrated 1. No fix released yet: 0. Runtime/base-image issues: **3**.
+**172** known vulnerabilities in **7** packages — ⚠️ actively exploited (KEV) **2**, critical **10**, high **66**, moderate **89**, low **6**, unrated 1. No fix released yet: 0. Runtime/base-image issues: **2**.
 
 ## Runtimes & base images
 
@@ -11,7 +11,6 @@ _Scanned 2026-10-22 20:49 UTC · vuln-guard 1.1.0 · OSV: ok · KEV: ok (www.cis
 |---|---|---|---|---|---|---|
 | 🔴 EOL | nodejs | 18 | 18.20.8 | 2025-04-30 | Image node:18-alpine · `Dockerfile` | End of life since 2025-04-30 — no more security patches. Move to 24. |
 | 🔴 EOL | go | 1.21.0 | 1.21.13 | 2024-08-13 | Go (toolchain) · `api/go.mod` | End of life since 2024-08-13 — no more security patches. Move to 1.27. |
-| 🟠 patch behind | nodejs | 22.19.0 | 22.23.4 | 2027-04-30 | Installed on this machine (node) · `(local)` | Patch 22.23.4 is available (security fixes usually included). |
 | 🟡 check | nodejs | 18 | 18.20.8 | 2025-04-30 | Node.js minimum (engines: >=18) · `package.json` | package.json still allows Node 18 (EOL since 2025-04-30). Raise the minimum to a supported version (24) and check what the servers actually run. |
 
 ## Vulnerable packages

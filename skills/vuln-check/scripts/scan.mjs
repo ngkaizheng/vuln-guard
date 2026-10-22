@@ -34,6 +34,7 @@ Usage: node scan.mjs [options]
   --no-native         Skip npm / pnpm audit and dotnet list package
                       (use for untrusted repos: those tools read repo config)
   --no-runtime        Skip runtime / base-image / EOL checks
+  --no-local          Skip runtimes installed on this machine (use in CI)
   --no-dev            Ignore dev-only dependencies
   --no-epss           Skip EPSS lookups
   --fail-on <level>   Exit 1 if any finding at/above: kev|critical|high|moderate|low
@@ -49,7 +50,7 @@ Behind a corporate proxy (Node >= 22.21 / 24.5):
 function parseArgs(argv) {
   const o = {
     path: process.cwd(), out: null, config: null, sarif: null, json: false, quiet: false,
-    offline: false, native: true, runtime: true, dev: true, epss: true,
+    offline: false, native: true, runtime: true, local: true, dev: true, epss: true,
     failOn: 'none', maxDepth: 8,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -65,6 +66,7 @@ function parseArgs(argv) {
       case '--offline': o.offline = true; break;
       case '--no-native': o.native = false; break;
       case '--no-runtime': o.runtime = false; break;
+      case '--no-local': o.local = false; break;
       case '--no-dev': o.dev = false; break;
       case '--no-epss': o.epss = false; break;
       case '--fail-on': o.failOn = next().toLowerCase(); break;
@@ -426,10 +428,14 @@ function parsePnpmLock(file, dir) {
   const edges = new Map();  // node key (no leading slash) → child node keys
   const prodRoots = [], devRoots = [], rootKeys = new Set();
   let section = null, node = null, sub = null, impSec = null, impDep = null;
+  // dependency → node key. An npm alias ("foo": "npm:bar@1.2.3") is written as `bar@1.2.3`.
+  const nodeKey = (name, ver) => (/^[0-9]/.test(ver) ? `${name}@${ver}` : /^@?[^@]+@[0-9]/.test(ver) ? ver : null);
+  const ROOT_SECTIONS = new Set(['dependencies', 'optionalDependencies', 'devDependencies']);
   const addRoot = (name, ver) => {
-    if (!/^[0-9]/.test(ver)) return; // link:, file:, workspace:
-    rootKeys.add(base(`${name}@${ver}`));
-    (impSec === 'devDependencies' ? devRoots : prodRoots).push(`${name}@${ver}`);
+    const k = ROOT_SECTIONS.has(impSec) && nodeKey(name, ver); // null for link:, file:, workspace:
+    if (!k) return;
+    rootKeys.add(base(k));
+    (impSec === 'devDependencies' ? devRoots : prodRoots).push(k);
   };
 
   for (const line of t.split(/\r?\n/)) {
@@ -460,7 +466,8 @@ function parsePnpmLock(file, dir) {
     }
     if ((sub === 'dependencies' || sub === 'optionalDependencies') && (m = line.match(/^ {6}(['"]?)(\S.*?)\1:\s*(.+)$/))) {
       if (!edges.has(node)) edges.set(node, []);
-      edges.get(node).push(`${m[2]}@${unq(m[3])}`);
+      const k = nodeKey(m[2], unq(m[3]));
+      if (k) edges.get(node).push(k);
     }
   }
 
@@ -1363,7 +1370,7 @@ function buildPlan(list) {
 }
 
 async function checkRuntimes() {
-  const decl = [...RUNTIMES, ...localRuntimes()];
+  const decl = [...RUNTIMES, ...(OPTS.local ? localRuntimes() : [])];
   if (!decl.length) return [];
   const products = [...new Set(decl.map((r) => r.product))];
   const data = new Map();

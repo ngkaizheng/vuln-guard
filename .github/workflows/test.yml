@@ -39,8 +39,8 @@ jobs:
       - name: Installer round trip
         shell: bash
         run: |
-          node install.mjs --target "$RUNNER_TEMP/skills"
-          test -f "$RUNNER_TEMP/skills/vuln-check/scripts/scan.mjs"
-          test -f "$RUNNER_TEMP/skills/vuln-fix/SKILL.md"
-          node install.mjs --target "$RUNNER_TEMP/skills" --uninstall
-          test ! -e "$RUNNER_TEMP/skills/vuln-check"
+          node install.mjs --target ci-skills
+          test -f ci-skills/vuln-check/scripts/scan.mjs
+          test -f ci-skills/vuln-fix/SKILL.md
+          node install.mjs --target ci-skills --uninstall
+          test ! -e ci-skills/vuln-check

@@ -33,7 +33,7 @@ jobs:
         run: dotnet restore ./YourSolution.sln
 
       - name: Vulnerability scan
-        run: node .vuln-guard/scan.mjs --fail-on critical
+        run: node .vuln-guard/scan.mjs --fail-on critical --no-local
         # --fail-on kev      → fail only on actively exploited CVEs
         # --fail-on critical → fail on critical or actively exploited (recommended)
         # --fail-on high     → stricter

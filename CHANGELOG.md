@@ -11,6 +11,7 @@ Added
 - `--sarif <file>`: SARIF 2.1.0 output for GitHub code scanning, including runtime and base-image issues. It is opt-in.
 - Severity is borrowed from GHSA or Bitnami aliases when an OSV record has none. On the test fixture, unrated Go advisories dropped from about 50% to about 1%.
 - `scripts/validate.mjs` checks skill frontmatter, links, version sync and the zero-dependency rule in CI.
+- `--no-local`: leave out runtimes installed on the scanning machine (the CI templates use it).
 - `examples/demo-app` and its sample [REPORT.md](examples/demo-app/REPORT.md).
 
 Fixed
