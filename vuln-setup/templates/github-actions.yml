@@ -44,6 +44,15 @@ jobs:
         run: |
           if [ -f .vuln-guard/reports/report.md ]; then cat .vuln-guard/reports/report.md >> "$GITHUB_STEP_SUMMARY"; fi
 
+      # Optional — show results under Security → Code scanning (free on public repos; private repos need
+      # GitHub Code Security). Add `--sarif vuln-guard.sarif` to the scan step and `security-events: write`
+      # to permissions, then uncomment:
+      # - uses: github/codeql-action/upload-sarif@v4
+      #   if: always()
+      #   with:
+      #     sarif_file: vuln-guard.sarif
+      #     category: vuln-guard
+
       - uses: actions/upload-artifact@v5
         if: always()
         with:

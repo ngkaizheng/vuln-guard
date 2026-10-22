@@ -51,6 +51,7 @@ Or run the scanner directly:
 ```bash
 node vuln-check/scripts/scan.mjs --path path/to/repo          # prints report, writes .vuln-guard/reports/report.md + .json
 node vuln-check/scripts/scan.mjs --path . --fail-on critical  # CI gate
+node vuln-check/scripts/scan.mjs --path . --sarif vuln.sarif   # optional: SARIF for GitHub code scanning
 node vuln-check/scripts/scan.mjs --help
 ```
 
@@ -88,4 +89,4 @@ VG_ONLINE=1 node --test test/scan.test.mjs     # also queries OSV.dev
 
 ## Limits
 
-Known advisories only — not a code scanner, secret scanner or pentest. Container OS packages are not scanned (use Trivy / Docker Scout). Maven `pom.xml` is direct-only without a lockfile. `bun.lock` isn't parsed.
+Known advisories only — not a code scanner, secret scanner or pentest. Container OS packages are not scanned (use Trivy / Docker Scout). Maven `pom.xml` is direct-only without a lockfile. Binary `bun.lockb` isn't readable (text `bun.lock` is). Go standard library is checked from `toolchain` / `go x.y.z` in go.mod, not from the Go you build with — `govulncheck` is more precise.

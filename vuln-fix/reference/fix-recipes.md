@@ -24,6 +24,9 @@ The scan's `fixPlan[].command` gives a starting command. Details and the transit
 - Classic: `yarn upgrade <pkg>@<fixed>`; transitive → `"resolutions": { "<pkg>": "<fixed>" }` in package.json, then `yarn install`.
 - Berry: `yarn up <pkg>@<fixed>`; transitive → `yarn up -R <pkg>`, or `resolutions` as above. Verify: `yarn why <pkg>`.
 
+## Bun (bun.lock)
+- Direct: `bun add <pkg>@<fixed>` (`-d` for dev). Transitive: `bun update <pkg>`; if still old, add `"overrides": { "<pkg>": "<fixed>" }` to package.json and `bun install`. Verify: `bun pm ls --all | grep <pkg>`.
+
 ## NuGet / .NET
 - Direct, versions in the .csproj: `dotnet add <project>.csproj package <Pkg> --version <fixed>`.
 - **Central Package Management** (`Directory.Packages.props`): change `<PackageVersion Include="<Pkg>" Version="<fixed>" />`. If a project uses `VersionOverride`, change it there instead.
@@ -43,7 +46,7 @@ The scan's `fixPlan[].command` gives a starting command. Details and the transit
 - Verify: `pip-audit` if available, or re-scan.
 
 ## Go
-`go get <module>@v<fixed> && go mod tidy`, then `go build ./... && go test ./...`. `govulncheck ./...` shows whether the vulnerable symbol is actually reachable. Go standard library issues are fixed by upgrading the Go toolchain (`go` / `toolchain` line + CI image).
+`go get <module>@v<fixed> && go mod tidy`, then `go build ./... && go test ./...`. `govulncheck ./...` shows whether the vulnerable symbol is actually reachable. Go standard library issues (`stdlib` in the report) are fixed by upgrading the Go toolchain: `go get toolchain@go<fixed>` (updates the `toolchain` line), plus the Go version in CI (`setup-go`) and the `golang:` build image. A patch in the same line (1.22.3 → 1.22.12) is a "will apply"; a move to a newer line (1.22 → 1.24) is "needs your decision".
 
 ## Rust
 `cargo update -p <crate> --precise <fixed>`; if Cargo.toml's requirement blocks it, bump the requirement. `cargo audit` to confirm.

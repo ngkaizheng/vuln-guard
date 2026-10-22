@@ -28,6 +28,7 @@ Usage: node scan.mjs [options]
                       (default: <path>/.vuln-guard/reports)
   --config <file>     Config file (default: <path>/.vuln-guard/config.json)
   --json              Print the JSON report to stdout instead of markdown
+  --sarif <file>      Also write SARIF 2.1.0 (for GitHub code scanning upload)
   --quiet             Print only the one-line summary
   --offline           No network: inventory + local tools only
   --no-native         Skip npm audit / dotnet list package
@@ -46,7 +47,7 @@ Behind a corporate proxy (Node >= 22.21 / 24.5):
 
 function parseArgs(argv) {
   const o = {
-    path: process.cwd(), out: null, config: null, json: false, quiet: false,
+    path: process.cwd(), out: null, config: null, sarif: null, json: false, quiet: false,
     offline: false, native: true, runtime: true, dev: true, epss: true,
     failOn: 'none', maxDepth: 8,
   };
@@ -58,6 +59,7 @@ function parseArgs(argv) {
       case '--out': o.out = next(); break;
       case '--config': o.config = next(); break;
       case '--json': o.json = true; break;
+      case '--sarif': o.sarif = next(); break;
       case '--quiet': o.quiet = true; break;
       case '--offline': o.offline = true; break;
       case '--no-native': o.native = false; break;
@@ -74,6 +76,7 @@ function parseArgs(argv) {
   if (!fs.existsSync(o.path)) die(`Path not found: ${o.path}`);
   o.out = path.resolve(o.out || path.join(o.path, '.vuln-guard', 'reports'));
   o.config = path.resolve(o.config || path.join(o.path, '.vuln-guard', 'config.json'));
+  if (o.sarif) o.sarif = path.resolve(o.sarif);
   const levels = ['none', 'kev', 'critical', 'high', 'moderate', 'low'];
   if (!levels.includes(o.failOn)) die(`--fail-on must be one of ${levels.join(', ')}`);
   return o;
@@ -156,6 +159,10 @@ const majorOf = (v) => {
   // 0.x: a minor bump is breaking
   return p[0] === 0 ? `0.${p[1] ?? 0}` : String(p[0]);
 };
+// Go never bumps its major; a new 1.x line is the "breaking" move for the toolchain
+const isMajorMove = (pkg, to) => Boolean(to) && (pkg.eco === ECO.go && pkg.name === 'stdlib'
+  ? to.split('.').slice(0, 2).join('.') !== pkg.version.split('.').slice(0, 2).join('.')
+  : majorOf(to) !== majorOf(pkg.version));
 
 // ───────────────────────────── config ─────────────────────────────
 
@@ -269,8 +276,10 @@ function collect(cfg) {
     if (npmLock) parseNpmLock(npmLock.file, dir);
     if (yarnLock) parseYarnLock(yarnLock.file, dir);
     if (pnpmLock) parsePnpmLock(pnpmLock.file, dir);
-    if (bases.has('bun.lock') || bases.has('bun.lockb')) note('info', `bun lockfile found in ${rel(dir)} — not parsed; versions taken from package.json if no other lockfile.`);
-    if (pj && !npmLock && !yarnLock && !pnpmLock && !isWorkspaceChild(dir)) {
+    const bunLock = has('bun.lock');
+    if (bunLock) parseBunLock(bunLock.file, dir);
+    else if (bases.has('bun.lockb')) note('warn', `${rel(dir)}: binary bun.lockb is not readable — run \`bun install --save-text-lockfile\` (Bun ≥ 1.1.39) to get bun.lock.`);
+    if (pj && !npmLock && !yarnLock && !pnpmLock && !bunLock && !isWorkspaceChild(dir)) {
       note('warn', `${rel(pkgJson.file)} has no lockfile — exact versions unknown, only pinned versions checked. Run npm install / pnpm install to create one.`);
       for (const [n, v] of Object.entries({ ...pj.dependencies })) addPkg(ECO.npm, n, v, { file: rel(pkgJson.file), manager: 'npm', direct: true, dev: false, dir });
       for (const [n, v] of Object.entries({ ...pj.devDependencies })) addPkg(ECO.npm, n, v, { file: rel(pkgJson.file), manager: 'npm', direct: true, dev: true, dir });
@@ -325,7 +334,7 @@ function isWorkspaceChild(dir) {
   // a package.json inside a workspace is covered by the root lockfile
   let d = path.dirname(dir);
   while (d.startsWith(OPTS.path) && d !== dir) {
-    for (const lf of ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']) if (fs.existsSync(path.join(d, lf))) return true;
+    for (const lf of ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock']) if (fs.existsSync(path.join(d, lf))) return true;
     if (d === OPTS.path) break;
     d = path.dirname(d);
   }
@@ -419,6 +428,27 @@ function parsePnpmLock(file, dir) {
     if (!/^[0-9]/.test(version)) continue;
     const isDirect = Boolean(directInfo && (directInfo.direct.has(name) || directInfo.dev.has(name)));
     addPkg(ECO.npm, name, version, { file: rel(file), manager: 'pnpm', direct: isDirect, dev: Boolean(directInfo && directInfo.dev.has(name) && !directInfo.direct.has(name)), dir });
+  }
+}
+
+// bun.lock (Bun ≥ 1.2 text lockfile): JSON with trailing commas.
+// packages: { "<path>": ["name@version", registry, { deps }, integrity] }
+function parseBunLock(file, dir) {
+  const t = readText(file); if (!t) return;
+  let j;
+  try { j = JSON.parse(t.replace(/,(\s*[}\]])/g, '$1')); } catch { note('warn', `Could not parse ${rel(file)}`); return; }
+  FILES_SEEN.push(rel(file));
+  const directInfo = DIRECT.get(`${dir}|npm`);
+  const rootWs = j.workspaces?.[''] || {};
+  const devNames = new Set(Object.keys(rootWs.devDependencies || {}));
+  const prodNames = new Set(Object.keys({ ...rootWs.dependencies, ...rootWs.optionalDependencies, ...rootWs.peerDependencies }));
+  for (const [key, v] of Object.entries(j.packages || {})) {
+    if (!Array.isArray(v) || typeof v[0] !== 'string') continue;
+    const at = v[0].lastIndexOf('@'); if (at <= 0) continue;
+    const name = v[0].slice(0, at), version = v[0].slice(at + 1);
+    const top = key === name; // nested copies are keyed "parent/name"
+    const direct = top && (prodNames.has(name) || devNames.has(name) || Boolean(directInfo && (directInfo.direct.has(name) || directInfo.dev.has(name))));
+    addPkg(ECO.npm, name, version, { file: rel(file), manager: 'bun', direct, dev: top && devNames.has(name) && !prodNames.has(name), dir });
   }
 }
 
@@ -583,6 +613,11 @@ function parseGoMod(file, dir) {
   const goV = (t.match(/^go\s+([\d.]+)/m) || [])[1];
   const tool = (t.match(/^toolchain\s+go([\d.]+)/m) || [])[1];
   if (tool || goV) declareRuntime('go', tool || goV, file, `Go (${tool ? 'toolchain' : 'go directive'})`, Boolean(tool));
+  // the Go standard library is compiled into the binary, so its CVEs ship with the app.
+  // OSV lists them under Go/"stdlib"; check the declared toolchain (or a full x.y.z go directive).
+  const stdlib = tool || (goV && goV.split('.').length >= 3 ? goV : null);
+  if (stdlib) addPkg(ECO.go, 'stdlib', stdlib, { file: rel(file), manager: 'go-toolchain', direct: true, dev: false, dir });
+  else if (goV) note('info', `${rel(file)}: \`go ${goV}\` without a patch version — Go standard library CVEs not checked. Add \`toolchain go${goV}.N\` or run govulncheck.`);
   const add = (line) => {
     const m = line.trim().match(/^([^\s]+)\s+(v[^\s]+)(\s*\/\/\s*indirect)?/);
     if (m) addPkg(ECO.go, m[1], m[2], { file: rel(file), manager: 'go', direct: !m[3], dev: false, dir });
@@ -811,9 +846,9 @@ async function osvQuery(pkgs) {
 }
 
 const VULN_CACHE = new Map();
-async function osvVuln(id) {
+async function osvVuln(id, quiet = false) {
   if (VULN_CACHE.has(id)) return VULN_CACHE.get(id);
-  const p = http(`${OSV}/vulns/${encodeURIComponent(id)}`).catch((e) => { note('warn', `OSV details for ${id} unavailable (${e.message})`); return null; });
+  const p = http(`${OSV}/vulns/${encodeURIComponent(id)}`).catch((e) => { if (!quiet) note('warn', `OSV details for ${id} unavailable (${e.message})`); return null; });
   VULN_CACHE.set(id, p);
   return p;
 }
@@ -988,7 +1023,9 @@ function fixCommand(p, fixed) {
     case 'poetry': return `poetry add "${n}>=${f}"  # or poetry update ${n}`;
     case 'uv': return `uv lock --upgrade-package ${n}`;
     case 'pipenv': return `pipenv update ${n}`;
+    case 'bun': return p.direct ? `bun add ${n}@${f}${dev ? ' -d' : ''}` : `bun update ${n}  # or "overrides": { "${n}": "${f}" } in package.json`;
     case 'go': return `go get ${n}@v${f} && go mod tidy`;
+    case 'go-toolchain': return `go get toolchain@go${f}  # and build / deploy with Go ${f} or newer`;
     case 'cargo': return `cargo update -p ${n} --precise ${f}`;
     case 'bundler': return `bundle update ${n} --conservative`;
     case 'composer': return `composer update ${n} --with-dependencies`;
@@ -1054,6 +1091,19 @@ async function main() {
         const up = String(n.range || '').match(/<\s*([0-9][\w.-]*)\s*$/);
         if (up && cmpVer(up[1], p.version) > 0) f.fixed = up[1];
       }
+    }
+  }
+
+  // ── missing severity ──
+  // Go (GO-…) and some PyPI (PYSEC-…) records carry no score; the GHSA or Bitnami (BIT-…) record for the same CVE usually does.
+  if (!OPTS.offline && osvOk) {
+    const unrated = [...findings.values()].filter((f) => f.severity.label === 'unknown');
+    const alias = (f) => ['GHSA-', 'BIT-', 'CVE-'].map((pre) => f.ids.find((x) => x.startsWith(pre) && x !== f.ids[0])).find(Boolean);
+    await mapLimit([...new Set(unrated.map(alias).filter(Boolean))], 8, (id) => osvVuln(id, true));
+    for (const f of unrated) {
+      const id = alias(f); if (!id) continue;
+      const v = await osvVuln(id, true);
+      if (v) { const s = severityOf(v); if (s.label !== 'unknown') f.severity = { ...s, from: id }; }
     }
   }
 
@@ -1133,6 +1183,7 @@ async function main() {
   const md = renderMarkdown(report);
   fs.writeFileSync(path.join(OPTS.out, 'report.json'), JSON.stringify(report, null, 2));
   fs.writeFileSync(path.join(OPTS.out, 'report.md'), md);
+  if (OPTS.sarif) { fs.mkdirSync(path.dirname(OPTS.sarif), { recursive: true }); fs.writeFileSync(OPTS.sarif, JSON.stringify(renderSarif(report), null, 2)); }
 
   if (OPTS.json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   else if (OPTS.quiet) process.stdout.write(summaryLine(report) + '\n');
@@ -1188,7 +1239,7 @@ function serialiseFinding(f) {
     severity: f.severity.label, cvss: f.severity.score, vector: f.severity.vector,
     kev: f.kev, epss: f.epss,
     fixedIn: f.fixed, noFixYet: f.noFixYet,
-    majorUpgrade: Boolean(f.fixed && majorOf(f.fixed) !== majorOf(f.pkg.version)),
+    majorUpgrade: isMajorMove(f.pkg, f.fixed),
     summary: f.summary, url: f.url, published: f.published,
     files: f.pkg.sources.map((s) => s.file), project: f.pkg.sources.find((s) => s.project)?.project || null,
     manager: f.pkg.sources[0]?.manager, foundBy: f.foundBy,
@@ -1209,7 +1260,7 @@ function buildPlan(list) {
     plan.push({
       priority: `P${Math.min(...fl.map((f) => f.priority))}`,
       ecosystem: pkg.eco, package: pkg.name, from: pkg.version, to: target,
-      majorUpgrade: Boolean(target && majorOf(target) !== majorOf(pkg.version)),
+      majorUpgrade: isMajorMove(pkg, target),
       direct: pkg.direct, devOnly: pkg.devOnly,
       fixes: fl.filter((f) => f.fixed).map((f) => f.displayId),
       noFixAvailable: fl.filter((f) => f.noFixYet).map((f) => f.displayId),
@@ -1291,6 +1342,54 @@ function shouldFail(list) {
   if (lvl === 'none') return false;
   if (lvl === 'kev') return list.some((f) => f.kev);
   return list.some((f) => f.kev || SEV_RANK[f.severity.label] >= SEV_RANK[lvl]);
+}
+
+// ───────────────────────────── SARIF ─────────────────────────────
+
+// GitHub code scanning reads properties["security-severity"] (0–10) to rank alerts
+const SARIF_SCORE = { critical: 9.5, high: 8.0, moderate: 5.5, low: 2.0, unknown: 5.0 };
+const SARIF_LEVEL = { critical: 'error', high: 'error', moderate: 'warning', low: 'note', unknown: 'warning' };
+
+const LINES = new Map(); // file → lines, read once
+function lineOf(file, name) {
+  if (!LINES.has(file)) LINES.set(file, (readText(path.join(OPTS.path, file)) || '').split(/\r?\n/));
+  const i = LINES.get(file).findIndex((l) => l.includes(name));
+  return i >= 0 ? i + 1 : 1;
+}
+
+function renderSarif(r) {
+  const rules = new Map();
+  const results = [];
+  for (const f of r.findings) {
+    if (!rules.has(f.id)) {
+      rules.set(f.id, {
+        id: f.id,
+        shortDescription: { text: f.summary || f.id },
+        helpUri: f.url,
+        help: { text: `${f.summary || f.id}\n${f.url}` },
+        properties: { tags: ['security', 'dependency', f.ecosystem], 'security-severity': String(f.cvss ?? SARIF_SCORE[f.severity] ?? 5) },
+      });
+    }
+    const fix = f.fixedIn ? `Upgrade to ${f.fixedIn}${f.majorUpgrade ? ' (major version — check breaking changes)' : ''}.` : f.noFixYet ? 'No fixed version released yet.' : 'See the advisory for the fixed version.';
+    const exploited = f.kev ? ' ACTIVELY EXPLOITED (CISA KEV).' : '';
+    const file = f.files[0] || '.';
+    results.push({
+      ruleId: f.id,
+      level: f.kev ? 'error' : SARIF_LEVEL[f.severity] || 'warning',
+      message: { text: `${f.package} ${f.version} (${f.ecosystem}, ${f.direct ? 'direct' : 'transitive'}${f.devOnly ? ', dev' : ''}): ${f.summary || f.id}.${exploited} ${fix}` },
+      locations: [{ physicalLocation: { artifactLocation: { uri: file, uriBaseId: '%SRCROOT%' }, region: { startLine: lineOf(file, f.package) } } }],
+      partialFingerprints: { 'vulnGuard/v1': `${f.ecosystem}|${f.package}|${f.version}|${f.id}` },
+      properties: { priority: f.priority },
+    });
+  }
+  return {
+    $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+    version: '2.1.0',
+    runs: [{
+      tool: { driver: { name: 'vuln-guard', version: r.tool.version, informationUri: 'https://github.com/ngkaizheng/vuln-guard', rules: [...rules.values()] } },
+      results,
+    }],
+  };
 }
 
 // ───────────────────────────── markdown ─────────────────────────────

@@ -32,7 +32,7 @@ Only package **names and versions** leave the machine — never source code. Int
    ```
    node <skill-dir>/scripts/scan.mjs --path . --quiet
    ```
-   Then read `.vuln-guard/reports/report.json` (structured) or `report.md` (human-readable). Useful options: `--no-dev` (production deps only), `--offline` (no network), `--no-native` (skip npm audit / dotnet), `--fail-on kev|critical|high` (CI gate), `--out <dir>`. Run `--help` for all. Exit codes: 0 ok, 1 findings at/above `--fail-on`, 2 tool error, 3 could not verify. Scanning a large repo with the native tools can take a few minutes — `dotnet list package` is the slow part.
+   Then read `.vuln-guard/reports/report.json` (structured) or `report.md` (human-readable). Useful options: `--no-dev` (production deps only), `--offline` (no network), `--no-native` (skip npm audit / dotnet), `--fail-on kev|critical|high` (CI gate), `--out <dir>`, `--sarif <file>` (only if the user wants results in GitHub code scanning). Run `--help` for all. Exit codes: 0 ok, 1 findings at/above `--fail-on`, 2 tool error, 3 could not verify. Scanning a large repo with the native tools can take a few minutes — `dotnet list package` is the slow part.
 
 4. **Check the report is trustworthy before you summarise it.**
    - `"verified": false` or a "NOT VERIFIED" note means *nothing was actually checked* — never tell the user "no vulnerabilities". Fix connectivity first:
@@ -68,7 +68,8 @@ Only package **names and versions** leave the machine — never source code. Int
 
 - Known, published advisories only. Not a code scanner (SAST), not a secret scanner, not a pentest.
 - Container images: base image *version/EOL* is checked, OS packages inside the image are not (use Trivy / Docker Scout / Grype).
-- Maven `pom.xml`: direct dependencies only unless a `gradle.lockfile` or osv-scanner is used. `bun.lock` is not parsed.
+- Maven `pom.xml`: direct dependencies only unless a `gradle.lockfile` or osv-scanner is used. Binary `bun.lockb` is not readable (ask for `bun install --save-text-lockfile`).
+- Go standard library: checked from go.mod `toolchain` / full `go x.y.z`, which may differ from the Go version CI actually builds with. Suggest `govulncheck` for call-level precision.
 - Advisory databases lag a few hours to days behind vendor bulletins.
 
 ## Configuration (`.vuln-guard/config.json`)
