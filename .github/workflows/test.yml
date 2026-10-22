@@ -4,11 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "23 4 * * 1" # weekly: live advisory data changes without code changes
 
 permissions:
   contents: read
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: node scripts/validate.mjs
+      - run: node --check skills/vuln-check/scripts/scan.mjs && node --check install.mjs
+
   test:
     strategy:
       fail-fast: false
@@ -21,7 +33,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
-      - run: node --check vuln-check/scripts/scan.mjs
       - run: node --test test/scan.test.mjs
         env:
           VG_ONLINE: "1"
+      - name: Installer round trip
+        shell: bash
+        run: |
+          node install.mjs --target "$RUNNER_TEMP/skills"
+          test -f "$RUNNER_TEMP/skills/vuln-check/scripts/scan.mjs"
+          test -f "$RUNNER_TEMP/skills/vuln-fix/SKILL.md"
+          node install.mjs --target "$RUNNER_TEMP/skills" --uninstall
+          test ! -e "$RUNNER_TEMP/skills/vuln-check"

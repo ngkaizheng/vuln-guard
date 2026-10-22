@@ -1,7 +1,7 @@
 # vuln-guard
 
-Agent skills (`vuln-check`, `vuln-fix`, `vuln-setup`) plus one zero-dependency scanner: `vuln-check/scripts/scan.mjs`.
-State and next steps: `STATUS.md`. Tests: `node --test test/scan.test.mjs` (add `VG_ONLINE=1` for live OSV).
+Agent skills (`vuln-check`, `vuln-fix`, `vuln-setup`) plus one zero-dependency scanner: `skills/vuln-check/scripts/scan.mjs`.
+State and next steps: `STATUS.md`. Tests: `node --test test/scan.test.mjs` (add `VG_ONLINE=1` for live OSV). Repo checks: `node scripts/validate.mjs`. Rules for changes: `CONTRIBUTING.md` (zero deps, one scanner file, never report clean when unchecked).
 
 ## 术语表
 

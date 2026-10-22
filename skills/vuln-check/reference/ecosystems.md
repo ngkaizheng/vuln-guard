@@ -5,7 +5,7 @@ The scanner walks the project (skipping `node_modules`, `bin`, `dist`, `.git`, `
 | Ecosystem | Files read | Notes |
 |---|---|---|
 | npm | `package-lock.json` (v1–v3), `npm-shrinkwrap.json`, `package.json` | `npm audit --package-lock-only` also runs when npm is installed |
-| pnpm | `pnpm-lock.yaml` (v5, v6, v9) | |
+| pnpm | `pnpm-lock.yaml` (v5, v6, v9) | `pnpm audit` also runs when pnpm is installed; dev-only transitive packages found by walking the graph from `importers` (v6+) |
 | Yarn | `yarn.lock` (classic v1 and Berry) | |
 | Bun | `bun.lock` (text, Bun ≥ 1.2) | binary `bun.lockb` is reported as a gap |
 | NuGet / .NET | `obj/project.assets.json` (full graph after restore), `packages.lock.json`, `*.csproj` / `*.fsproj` / `*.vbproj`, `Directory.Packages.props` (central package management, `VersionOverride`, `$(Property)` versions), `packages.config` | `dotnet list package --vulnerable --include-transitive` also runs when the SDK is installed |

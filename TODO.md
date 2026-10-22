@@ -4,7 +4,7 @@ Automated: `test/scan.test.mjs` (lockfile parsing for npm/pnpm/yarn/pip/NuGet, r
 
 Checked 2026-10-23 on Windows 11, Node 22.19, .NET SDK 10: real OSV/KEV/EPSS/endoflife.date, npm audit and dotnet list package on 4 real repos; paths with spaces and `&`. Still open:
 
-- [x] **Real network run** — `node vuln-check/scripts/scan.mjs --path <a real repo>` on the personal laptop. Expect `OSV: ok · KEV: ok` in the header.
+- [x] **Real network run** — `node skills/vuln-check/scripts/scan.mjs --path <a real repo>` on the personal laptop. Expect `OSV: ok · KEV: ok` in the header.
 - [x] **Real `dotnet list package --vulnerable --format json`** — run on a real .NET solution after `dotnet restore`; confirm the header lists `dotnet list package` and findings show "OSV+dotnet list package".
 - [x] **Real `npm audit`** on a React project with a package-lock.json.
 - [ ] **Company laptop** — with `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1` (+ `NODE_EXTRA_CA_CERTS` if needed). If still blocked, check `--offline` gives a partial-coverage report, not "0 vulnerabilities".

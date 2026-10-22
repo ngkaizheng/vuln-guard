@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem in vuln-guard itself
+    url: https://github.com/ngkaizheng/vuln-guard/security/advisories/new
+    about: Please report privately, not in a public issue.

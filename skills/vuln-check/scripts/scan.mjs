@@ -7,7 +7,7 @@
 //
 // Data sources: OSV.dev (all ecosystems), CISA KEV (actively exploited),
 // FIRST EPSS (exploit probability), endoflife.date (runtime patch/EOL),
-// plus `npm audit` and `dotnet list package --vulnerable` when available.
+// plus `npm audit`, `pnpm audit` and `dotnet list package --vulnerable` when available.
 // Only package names + versions leave the machine, never source code.
 
 import fs from 'node:fs';
@@ -15,7 +15,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 
-const TOOL_VERSION = '1.0.0';
+const TOOL_VERSION = '1.1.0';
 
 // ───────────────────────────── CLI ─────────────────────────────
 
@@ -31,7 +31,8 @@ Usage: node scan.mjs [options]
   --sarif <file>      Also write SARIF 2.1.0 (for GitHub code scanning upload)
   --quiet             Print only the one-line summary
   --offline           No network: inventory + local tools only
-  --no-native         Skip npm audit / dotnet list package
+  --no-native         Skip npm / pnpm audit and dotnet list package
+                      (use for untrusted repos: those tools read repo config)
   --no-runtime        Skip runtime / base-image / EOL checks
   --no-dev            Ignore dev-only dependencies
   --no-epss           Skip EPSS lookups
@@ -113,11 +114,11 @@ function which(cmd) {
 }
 
 function run(cmd, args, cwd, timeoutMs = 180000) {
-  // Windows needs a shell only for npm (npm.cmd). Never use one for commands that get
+  // Windows needs a shell only for npm / pnpm (.cmd shims). Never use one for commands that get
   // repo file paths as arguments: spaces would split them and `&` in a file name would run code.
   const r = spawnSync(cmd, args, {
     cwd, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024,
-    shell: process.platform === 'win32' && cmd === 'npm', windowsHide: true,
+    shell: process.platform === 'win32' && (cmd === 'npm' || cmd === 'pnpm'), windowsHide: true,
   });
   return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '', error: r.error };
 }
@@ -401,32 +402,87 @@ function parseYarnLock(file, dir) {
   }
 }
 
+// pnpm-lock.yaml v5–v9. From v6 on, `importers` lists each project's dependencies and
+// devDependencies, and `packages` / `snapshots` list what each package pulls in, so walking
+// the graph from the production roots tells which transitive packages are dev-only.
 function parsePnpmLock(file, dir) {
   const t = readText(file); if (!t) return;
   FILES_SEEN.push(rel(file));
   const directInfo = DIRECT.get(`${dir}|npm`);
   const lockVer = parseFloat((t.match(/^lockfileVersion:\s*['"]?([\d.]+)/m) || [])[1] || '9');
-  let section = null;
-  for (const line of t.split(/\r?\n/)) {
-    const top = line.match(/^([a-zA-Z]+):\s*$/);
-    if (top) { section = top[1]; continue; }
-    if (section !== 'packages' && section !== 'snapshots') continue;
-    const m = line.match(/^ {2}['"]?([^'"\s].*?)['"]?:\s*$/);
-    if (!m) continue;
-    let key = m[1].replace(/^\//, '');
-    let name, version;
+  const unq = (s) => s.trim().replace(/^['"]|['"]$/g, '');
+  const base = (key) => key.replace(/^\//, '').replace(/\(.*$/, ''); // drop v6 slash and peer suffix
+  const split = (key) => {
     if (lockVer < 6) { // v5: /name/1.2.3_peer@x or /@scope/name/1.2.3
-      key = key.replace(/_.*$/, '');
-      const slash = key.lastIndexOf('/'); if (slash <= 0) continue;
-      name = key.slice(0, slash); version = key.slice(slash + 1);
-    } else { // v6+/v9: name@1.2.3(peer@x)
-      key = key.replace(/\(.*$/, '');
-      const at = key.lastIndexOf('@'); if (at <= 0) continue;
-      name = key.slice(0, at); version = key.slice(at + 1);
+      const k = key.replace(/^\//, '').replace(/_.*$/, '');
+      const slash = k.lastIndexOf('/');
+      return slash > 0 ? [k.slice(0, slash), k.slice(slash + 1)] : null;
     }
-    if (!/^[0-9]/.test(version)) continue;
-    const isDirect = Boolean(directInfo && (directInfo.direct.has(name) || directInfo.dev.has(name)));
-    addPkg(ECO.npm, name, version, { file: rel(file), manager: 'pnpm', direct: isDirect, dev: Boolean(directInfo && directInfo.dev.has(name) && !directInfo.direct.has(name)), dir });
+    const k = base(key); const at = k.lastIndexOf('@');
+    return at > 0 ? [k.slice(0, at), k.slice(at + 1)] : null;
+  };
+
+  const pkgs = new Map();   // base key → { name, version, devFlag }
+  const edges = new Map();  // node key (no leading slash) → child node keys
+  const prodRoots = [], devRoots = [], rootKeys = new Set();
+  let section = null, node = null, sub = null, impSec = null, impDep = null;
+  const addRoot = (name, ver) => {
+    if (!/^[0-9]/.test(ver)) return; // link:, file:, workspace:
+    rootKeys.add(base(`${name}@${ver}`));
+    (impSec === 'devDependencies' ? devRoots : prodRoots).push(`${name}@${ver}`);
+  };
+
+  for (const line of t.split(/\r?\n/)) {
+    let m = line.match(/^([a-zA-Z]+):\s*$/);
+    if (m) { section = m[1]; node = null; continue; }
+    if (section === 'importers') {
+      if (/^ {2}\S/.test(line)) { impSec = null; continue; }
+      if ((m = line.match(/^ {4}(\w+):\s*$/))) { impSec = m[1]; continue; }
+      if ((m = line.match(/^ {6}(['"]?)(\S.*?)\1:\s*(.*)$/))) { impDep = m[2]; if (m[3]) addRoot(impDep, unq(m[3])); continue; }
+      if ((m = line.match(/^ {8}version:\s*(.+)$/)) && impDep) addRoot(impDep, unq(m[1]));
+      continue;
+    }
+    if (section !== 'packages' && section !== 'snapshots') continue;
+    if ((m = line.match(/^ {2}(['"]?)(\S.*?)\1:\s*(\{\})?\s*$/))) {
+      node = m[2].replace(/^\//, ''); sub = null;
+      const nv = split(m[2]);
+      if (nv && /^[0-9]/.test(nv[1])) {
+        const k = lockVer < 6 ? `${nv[0]}@${nv[1]}` : base(m[2]);
+        if (!pkgs.has(k)) pkgs.set(k, { name: nv[0], version: nv[1], devFlag: null });
+      }
+      continue;
+    }
+    if (!node) continue;
+    if ((m = line.match(/^ {4}(\w+):\s*(.*)$/))) {
+      sub = m[1];
+      if (sub === 'dev' && /^(true|false)$/.test(m[2])) { const p = pkgs.get(base(node)); if (p) p.devFlag = m[2] === 'true'; }
+      continue;
+    }
+    if ((sub === 'dependencies' || sub === 'optionalDependencies') && (m = line.match(/^ {6}(['"]?)(\S.*?)\1:\s*(.+)$/))) {
+      if (!edges.has(node)) edges.set(node, []);
+      edges.get(node).push(`${m[2]}@${unq(m[3])}`);
+    }
+  }
+
+  // reachable from production roots → ships; everything else only reachable from devDependencies
+  let prodReach = null;
+  if (lockVer >= 6 && (prodRoots.length || devRoots.length)) {
+    prodReach = new Set();
+    const queue = [...prodRoots];
+    const seen = new Set();
+    while (queue.length) {
+      const k = queue.pop();
+      if (seen.has(k)) continue;
+      seen.add(k); prodReach.add(base(k));
+      for (const c of edges.get(k) || []) queue.push(c);
+    }
+  }
+
+  for (const p of pkgs.values()) {
+    const isDirect = rootKeys.size ? rootKeys.has(`${p.name}@${p.version}`) : Boolean(directInfo && (directInfo.direct.has(p.name) || directInfo.dev.has(p.name)));
+    const dev = prodReach ? !prodReach.has(`${p.name}@${p.version}`)
+      : p.devFlag ?? Boolean(directInfo && directInfo.dev.has(p.name) && !directInfo.direct.has(p.name));
+    addPkg(ECO.npm, p.name, p.version, { file: rel(file), manager: 'pnpm', direct: isDirect, dev, dir });
   }
 }
 
@@ -951,6 +1007,8 @@ function fixedVersionFor(v, pkg) {
 
 // ───────────────────────────── native tools ─────────────────────────────
 
+const NATIVE_OK = new Set(); // tools that answered, even with zero findings
+
 function nativeNpmAudit() {
   const out = [];
   if (!which('npm')) return out;
@@ -962,11 +1020,35 @@ function nativeNpmAudit() {
     if (start < 0) { note('warn', `npm audit in ${rel(dir)} produced no JSON (${(r.stderr || r.error?.message || '').split('\n')[0]})`); continue; }
     let j; try { j = JSON.parse(r.stdout.slice(start)); } catch { note('warn', `npm audit JSON unreadable in ${rel(dir)}`); continue; }
     if (j.error) { note('warn', `npm audit in ${rel(dir)}: ${j.error.summary || j.error.code}`); continue; }
+    NATIVE_OK.add('npm audit');
     for (const [name, v] of Object.entries(j.vulnerabilities || {})) {
       for (const via of v.via || []) {
         if (typeof via !== 'object') continue;
         const ghsa = (String(via.url || '').match(/GHSA-[\w-]+/) || [])[0];
         out.push({ tool: 'npm audit', eco: ECO.npm, name: via.name || name, id: ghsa || String(via.source), title: via.title, severity: normLabel(via.severity), range: via.range, dir });
+      }
+    }
+  }
+  return out;
+}
+
+// pnpm audit (npm registry audit API; also works through a company npm mirror)
+function nativePnpmAudit() {
+  const out = [];
+  if (!which('pnpm')) return out;
+  const dirs = new Set([...PKGS.values()].flatMap((p) => p.sources.filter((s) => s.manager === 'pnpm').map((s) => s.dir)));
+  for (const dir of dirs) {
+    const r = run('pnpm', ['audit', '--json'], dir);
+    const start = r.stdout.indexOf('{');
+    if (start < 0) { note('warn', `pnpm audit in ${rel(dir)} produced no JSON (${(r.stderr || r.error?.message || '').split('\n')[0]})`); continue; }
+    let j; try { j = JSON.parse(r.stdout.slice(start)); } catch { note('warn', `pnpm audit JSON unreadable in ${rel(dir)}`); continue; }
+    if (j.error || !j.advisories) { note('warn', `pnpm audit in ${rel(dir)}: ${j.error?.message || j.error?.code || 'no advisories field'}`); continue; }
+    NATIVE_OK.add('pnpm audit');
+    for (const a of Object.values(j.advisories)) {
+      const id = a.github_advisory_id || (String(a.url || '').match(/GHSA-[\w-]+/) || [])[0] || String(a.id);
+      const patched = String(a.patched_versions || '').match(/^>=\s*([0-9][\w.-]*)$/);
+      for (const v of new Set((a.findings || []).map((x) => x.version))) {
+        out.push({ tool: 'pnpm audit', eco: ECO.npm, name: a.module_name, version: v, id, title: a.title, severity: normLabel(a.severity), range: patched ? `<${patched[1]}` : null, dir });
       }
     }
   }
@@ -984,6 +1066,7 @@ function nativeDotnet() {
     const start = r.stdout.indexOf('{');
     if (start < 0) { note('warn', `dotnet list package failed for ${rel(t)} (${(r.stderr || r.stdout || r.error?.message || '').trim().split('\n')[0]})`); continue; }
     let j; try { j = JSON.parse(r.stdout.slice(start)); } catch { note('warn', `dotnet list package JSON unreadable for ${rel(t)}`); continue; }
+    NATIVE_OK.add('dotnet list package');
     for (const pr of j.problems || []) note('warn', `dotnet: ${pr.text || pr.message || JSON.stringify(pr)}`);
     for (const proj of j.projects || []) {
       for (const fw of proj.frameworks || []) {
@@ -1074,8 +1157,8 @@ async function main() {
   // ── native tools ──
   const toolsRun = [];
   if (OPTS.native) {
-    const natives = [...nativeNpmAudit(), ...nativeDotnet()];
-    for (const t of new Set(natives.map((n) => n.tool))) toolsRun.push(t);
+    const natives = [...nativeNpmAudit(), ...nativePnpmAudit(), ...nativeDotnet()];
+    toolsRun.push(...NATIVE_OK);
     for (const n of natives) {
       const p = findPkgForNative(pkgs, n);
       if (!p) continue;
@@ -1152,7 +1235,13 @@ async function main() {
   // A result is only "verified" if at least one advisory source actually answered.
   const verified = osvOk || toolsRun.length > 0 || pkgs.length === 0;
   if (!verified) note('error', 'NOT VERIFIED: no advisory source (OSV, npm audit, dotnet) could be used, so "0 vulnerabilities" means "not checked". Fix network access or run with the native tools available.');
-  else if (!osvOk && toolsRun.length) note('warn', `Partial coverage: only ${toolsRun.join(' + ')} results — other ecosystems (${Object.keys(groupCount(pkgs, (p) => p.eco)).filter((e) => !(e === 'npm' && toolsRun.includes('npm audit')) && !(e === 'NuGet' && toolsRun.includes('dotnet list package'))).join(', ') || 'none'}) were not checked.`);
+  else if (!osvOk && toolsRun.length) {
+    const covered = (e) => (e === ECO.npm && (toolsRun.includes('npm audit') || toolsRun.includes('pnpm audit'))) || (e === ECO.nuget && toolsRun.includes('dotnet list package'));
+    const missed = Object.keys(groupCount(pkgs, (p) => p.eco)).filter((e) => !covered(e));
+    note('warn', missed.length
+      ? `Partial coverage: only ${toolsRun.join(' + ')} results — ${missed.join(', ')} packages were not checked.`
+      : `Only ${toolsRun.join(' + ')} was used (no OSV): exploitation data (CISA KEV, EPSS) is missing, so priorities are by severity only.`);
+  }
 
   const report = {
     tool: { name: 'vuln-guard', version: TOOL_VERSION },
@@ -1298,7 +1387,10 @@ async function checkRuntimes() {
     const isEol = cyc.eol === true || (eolDate && eolDate <= today);
     const soon = eolDate && !isEol && (eolDate - today) / 86400e3 <= 120;
     const behind = r.pinned && out.latest && cmpVer(v, out.latest) < 0;
-    const newest = rows.filter((c) => !(c.eol === true || (typeof c.eol === 'string' && new Date(c.eol) <= today))).map((c) => String(c.cycle)).sort(cmpVer).pop();
+    // recommend the newest supported line, preferring LTS where the product has them (Node 24, not Current 26)
+    const live = rows.filter((c) => !(c.eol === true || (typeof c.eol === 'string' && new Date(c.eol) <= today)));
+    const lts = live.filter((c) => c.lts === true || (typeof c.lts === 'string' && new Date(c.lts) <= today));
+    const newest = (lts.length ? lts : live).map((c) => String(c.cycle)).sort(cmpVer).pop();
     if (r.sdk) {
       out.latest = null;
       out.status = isEol ? 'eol' : soon ? 'eol-soon' : 'ok';

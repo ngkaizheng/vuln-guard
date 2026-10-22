@@ -1,6 +1,6 @@
 ---
 name: vuln-fix
-description: Fix known vulnerabilities found by vuln-check — upgrades vulnerable dependencies (npm/pnpm/yarn, NuGet, PyPI, Go, Cargo, Maven/Gradle, Composer, RubyGems, Pub) and outdated runtime/base-image patch versions on a local branch, then builds, tests and re-scans. Never commits or pushes. Use when asked to fix, patch or remediate vulnerabilities/CVEs, upgrade vulnerable packages, or "apply the vuln-check results".
+description: Fix known vulnerabilities found by vuln-check — upgrades vulnerable dependencies (npm/pnpm/yarn/bun, NuGet, PyPI, Go, Cargo, Maven/Gradle, Composer, RubyGems, Pub) and outdated runtime/base-image patch versions on a local branch, then builds, tests and re-scans; major upgrades are listed for the user to decide. Never commits or pushes. Use when asked to fix, patch or remediate vulnerabilities/CVEs, upgrade vulnerable packages, resolve npm audit / Dependabot alerts, or "apply the vuln-check results".
 ---
 
 # vuln-fix
